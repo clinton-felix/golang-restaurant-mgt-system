@@ -12,6 +12,7 @@ import (
 	"go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"go.mongodb.org/mongo-driver/mongo"
+	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // create menucollection in database
@@ -90,6 +91,69 @@ func CreateMenu() gin.HandlerFunc{
 // update menu
 func UpdateMenu() gin.HandlerFunc{
 	return func(c *gin.Context) {
-		
+		var ctx, cancel = context.WithTimeout(context.Background(), 100*time.Second)
+		var menu models.Menu
+
+		// bind to the Menu Object
+		if err := c.BindJSON(&menu) ; err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+
+		menuId := c.Param("menu_id")
+		filter := bson.M{"menu_id":menuId}
+
+		// updateObj is a varable that effects update on the
+		// mongo database
+		var updateObj primitive.D
+
+		// confirm that menu object has a start and end date
+		if menu.Start_date != nil && menu.End_date != nil {
+			if !inTimeSpan(*menu.Start_date, *menu.End_date, time.Now()){
+				msg := "kindly retype the time"
+				c.JSON(http.StatusInternalServerError, gin.H{"error":msg})
+				defer cancel()
+				return
+			}
+
+			// append to the update object
+			updateObj = append(updateObj, bson.E{"start_date", menu.Start_date})
+			updateObj = append(updateObj, bson.E{"end_date", menu.End_date})
+
+			if menu.Name != "" {
+				updateObj = append(updateObj, bson.E{"name", menu.Name})
+			}
+			if menu.Category != "" {
+				updateObj = append(updateObj, bson.E{"name", menu.Category})
+			}
+
+			menu.Updated_at, _ = time.Parse(time.RFC3339, time.Now().Format(time.RFC3339))
+			updateObj = append(updateObj, bson.E{"updated_at", menu.Updated_at})
+
+			upsert := true
+
+			opt := options.UpdateOptions{
+				Upsert: &upsert,
+			}
+
+			// attempt to update the database with updateObj
+			result, err := menuCollection.UpdateOne(
+				ctx,
+				filter,
+				bson.D{
+					{"$set", updateObj},
+				},
+				&opt,
+			)
+
+			if err != nil{
+				msg := "menu update failed"
+				c.JSON(http.StatusInternalServerError, gin.H{"error":msg})
+			}
+
+			defer cancel()
+			c.JSON(http.StatusOK, result)
+		}
+
 	}
 }
